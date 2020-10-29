@@ -23,8 +23,8 @@ pcm.plugloudness {
     # the compensation, and of the FFT, that implements it.  The
     # defaults should serve in most cases.
 
-    # window 4096
-    # fft 16384
+    # impulse_length 4096
+    # fft_length 16384
 
     # The setting below is optional. If it points to a writeable file,
     # it will be used as cache to save some CPU time, at the cost of a

@@ -279,7 +279,7 @@ static void update_filter_weights(struct context *context)
         struct timespec t;
 
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
-        TRACE("(Re)calculated filter response (window length %d),"
+        TRACE("(Re)calculated filter response (impulse length %d),"
               " in %.2f ms.\n",
               M,
               (t.tv_sec - t_0.tv_sec) * 1e3 +
@@ -876,7 +876,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
     struct context *context;
     snd_config_t *slave = NULL;
     long int reference = 82, attenuation = -10, compensate = 1;
-    long int window_length = 4096, fft_length = 16384;
+    long int impulse_length = 4096, fft_length = 16384;
 
 #ifdef WITH_THREADS
     long int threads = 1;
@@ -966,22 +966,22 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
             continue;
         }
 
-        if (strcmp(id, "window") == 0) {
-            snd_config_get_integer(n, &window_length);
+        if (strcmp(id, "impulse_length") == 0) {
+            snd_config_get_integer(n, &impulse_length);
 
-            if (window_length < 1024) {
-                SNDERR("Window length must not be lower than 1024");
+            if (impulse_length < 1024) {
+                SNDERR("Impulse length must not be lower than 1024");
                 return -EINVAL;
             }
 
             continue;
         }
 
-        if (strcmp(id, "fft") == 0) {
+        if (strcmp(id, "fft_length") == 0) {
             snd_config_get_integer(n, &fft_length);
 
-            if (fft_length < 2 * window_length) {
-                SNDERR("FFT length must be at least double the window length");
+            if (fft_length < 2 * impulse_length) {
+                SNDERR("FFT length must be at least double the impulse length");
                 return -EINVAL;
             }
 
@@ -1041,7 +1041,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
     context->threads = threads;
 #endif
 
-    context->impulse_length = window_length;
+    context->impulse_length = impulse_length;
     context->fft_length = fft_length;
 
     if (prefix) {
