@@ -68,10 +68,9 @@ struct context {
 
     char *prefix;
 
-    /* Impulse response, FFT and design-phase interpolation length, in
-     * that order. */
-
-    unsigned int lengths[3];
+    unsigned int impulse_length;
+    unsigned int fft_length;
+    unsigned int interpolation_length;
 
     /* Filtering-related stuff. */
 
@@ -125,8 +124,8 @@ static float kaiser(float i, float l, float beta)
 
 static void update_filter_weights(struct context *context)
 {
-    const unsigned int M = context->lengths[0];
-    const unsigned int L = context->lengths[2];
+    const unsigned int M = context->impulse_length;
+    const unsigned int L = context->interpolation_length;
     const float delta_f = (float)context->ext.rate / L;
 
     unsigned int i, j;
@@ -218,8 +217,8 @@ static void update_filter_weights(struct context *context)
             fp = fopen("parameters", "w");
 
             fprintf(fp, "%u %u %u %u %d %d %f\n",
-                    context->lengths[0], context->lengths[1],
-                    context->lengths[2], context->ext.rate,
+                    context->impulse_length, context->fft_length,
+                    context->interpolation_length, context->ext.rate,
                     context->values[REFERENCE], context->values[ATTENUATION],
                     beta);
 
@@ -239,7 +238,7 @@ static void update_filter_weights(struct context *context)
 #ifdef PLOT_FILTER
     {
         FILE *fp;
-        const unsigned int N = context->lengths[1];
+        const unsigned int N = context->fft_length;
         const float delta_f = (float)context->ext.rate / N;
 
         fp = fopen("realized", "w");
@@ -280,7 +279,7 @@ static void update_filter_weights(struct context *context)
         struct timespec t;
 
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
-        TRACE("(Re)calculated filter response (window length %d),"
+        TRACE("(Re)calculated filter response (impulse length %d),"
               " in %.2f ms.\n",
               M,
               (t.tv_sec - t_0.tv_sec) * 1e3 +
@@ -302,8 +301,8 @@ static snd_pcm_sframes_t transfer_callback(
     unsigned int i;
     int j;
 
-    const unsigned int M = context->lengths[0];
-    const unsigned int N = context->lengths[1];
+    const unsigned int M = context->impulse_length;
+    const unsigned int N = context->fft_length;
     const int C = ext->channels;
 
     /* Handle any pending ctl events and update the filter, if
@@ -480,18 +479,8 @@ static snd_pcm_sframes_t transfer_callback(
     return size;
 }
 
-static int init_callback(snd_pcm_extplug_t *ext)
-{
+static int init_callback(snd_pcm_extplug_t *ext) {
     struct context *context = (struct context *)ext->private_data;
-    const unsigned int N = context->lengths[1];
-    unsigned int L;
-    const int C = ext->channels;
-
-#ifndef NDEBUG
-    struct timespec t_0;
-
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t_0);
-#endif
 
 #ifdef WITH_THREADS
     if (!fftwf_init_threads()) {
@@ -502,6 +491,38 @@ static int init_callback(snd_pcm_extplug_t *ext)
     fftwf_plan_with_nthreads(context->threads);
 
     TRACE("Planning FFTs using %d threads.\n", context->threads);
+#endif
+
+    return 0;
+}
+
+static int hw_params_callback(snd_pcm_extplug_t *ext, snd_pcm_hw_params_t* params)
+{
+    struct context *context = (struct context *)ext->private_data;
+
+    if(context->fft_length == 0) {
+        /* Find the best FFT length based on maximum possible period size */
+
+        snd_pcm_uframes_t psize;
+        int ret, dir;
+        if((ret = snd_pcm_hw_params_get_period_size_max(params, &psize, &dir)) < 0 || dir == 1) {
+            SNDERR("could not query max period size");
+            return -EINVAL;
+        }
+
+        /* Choose smallest power of two N such that N ≥ L+M-1 */
+        context->fft_length = 1 << (int)ceilf(log2f(context->impulse_length + psize - 1));
+        TRACE("Impulse length is %d and maximum period size is %d, using optimal FFT size %d\n", context->impulse_length, psize, context->fft_length);
+    }
+
+    const unsigned int N = context->fft_length;
+    unsigned int L;
+    const int C = ext->channels;
+
+#ifndef NDEBUG
+    struct timespec t_0;
+
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t_0);
 #endif
 
     /* Allocate buffers and create plans for the various FFT
@@ -516,7 +537,7 @@ static int init_callback(snd_pcm_extplug_t *ext)
     */
 
     int plan_flags = context->wisdom_path ? FFTW_MEASURE : FFTW_ESTIMATE;
-    context->lengths[2] = L = 1 << ((int)(ceilf(log2f((float)ext->rate / 2))));
+    context->interpolation_length = L = 1 << ((int)(ceilf(log2f((float)ext->rate / 2))));
 
     context->input = (float *)fftwf_malloc(sizeof(float) * N * C);
     context->output = (float *)fftwf_malloc(sizeof(float) * N * C);
@@ -642,6 +663,7 @@ static int close_callback(snd_pcm_extplug_t *ext) {
 static snd_pcm_extplug_callback_t callbacks = {
     .transfer = transfer_callback,
     .init = init_callback,
+    .hw_params = hw_params_callback,
     .close = close_callback,
 };
 
@@ -877,7 +899,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
     struct context *context;
     snd_config_t *slave = NULL;
     long int reference = 82, attenuation = -10, compensate = 1;
-    long int window_length = 4096, fft_length = 16384;
+    long int impulse_length = 4096, fft_length = 0;
 
 #ifdef WITH_THREADS
     long int threads = 1;
@@ -967,22 +989,22 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
             continue;
         }
 
-        if (strcmp(id, "window") == 0) {
-            snd_config_get_integer(n, &window_length);
+        if (strcmp(id, "impulse_length") == 0) {
+            snd_config_get_integer(n, &impulse_length);
 
-            if (window_length < 1024) {
-                SNDERR("Window length must not be lower than 1024");
+            if (impulse_length < 1024) {
+                SNDERR("Impulse length must not be lower than 1024");
                 return -EINVAL;
             }
 
             continue;
         }
 
-        if (strcmp(id, "fft") == 0) {
+        if (strcmp(id, "fft_length") == 0) {
             snd_config_get_integer(n, &fft_length);
 
-            if (fft_length < 2 * window_length) {
-                SNDERR("FFT length must be at least double the window length");
+            if (fft_length != 0 && fft_length < 2 * impulse_length) {
+                SNDERR("FFT length must be at least double the impulse length");
                 return -EINVAL;
             }
 
@@ -1042,8 +1064,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
     context->threads = threads;
 #endif
 
-    context->lengths[0] = window_length;
-    context->lengths[1] = fft_length;
+    context->impulse_length = impulse_length;
+    context->fft_length = fft_length;
 
     if (prefix) {
         context->prefix = strdup(prefix);
