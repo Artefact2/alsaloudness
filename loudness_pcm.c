@@ -479,18 +479,8 @@ static snd_pcm_sframes_t transfer_callback(
     return size;
 }
 
-static int init_callback(snd_pcm_extplug_t *ext)
-{
+static int init_callback(snd_pcm_extplug_t *ext) {
     struct context *context = (struct context *)ext->private_data;
-    const unsigned int N = context->fft_length;
-    unsigned int L;
-    const int C = ext->channels;
-
-#ifndef NDEBUG
-    struct timespec t_0;
-
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t_0);
-#endif
 
 #ifdef WITH_THREADS
     if (!fftwf_init_threads()) {
@@ -501,6 +491,38 @@ static int init_callback(snd_pcm_extplug_t *ext)
     fftwf_plan_with_nthreads(context->threads);
 
     TRACE("Planning FFTs using %d threads.\n", context->threads);
+#endif
+
+    return 0;
+}
+
+static int hw_params_callback(snd_pcm_extplug_t *ext, snd_pcm_hw_params_t* params)
+{
+    struct context *context = (struct context *)ext->private_data;
+
+    if(context->fft_length == 0) {
+        /* Find the best FFT length based on maximum possible period size */
+
+        snd_pcm_uframes_t psize;
+        int ret, dir;
+        if((ret = snd_pcm_hw_params_get_period_size_max(params, &psize, &dir)) < 0 || dir == 1) {
+            SNDERR("could not query max period size");
+            return -EINVAL;
+        }
+
+        /* Choose smallest power of two N such that N ≥ L+M-1 */
+        context->fft_length = 1 << (int)ceilf(log2f(context->impulse_length + psize - 1));
+        TRACE("Impulse length is %d and maximum period size is %d, using optimal FFT size %d\n", context->impulse_length, psize, context->fft_length);
+    }
+
+    const unsigned int N = context->fft_length;
+    unsigned int L;
+    const int C = ext->channels;
+
+#ifndef NDEBUG
+    struct timespec t_0;
+
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t_0);
 #endif
 
     /* Allocate buffers and create plans for the various FFT
@@ -641,6 +663,7 @@ static int close_callback(snd_pcm_extplug_t *ext) {
 static snd_pcm_extplug_callback_t callbacks = {
     .transfer = transfer_callback,
     .init = init_callback,
+    .hw_params = hw_params_callback,
     .close = close_callback,
 };
 
@@ -876,7 +899,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
     struct context *context;
     snd_config_t *slave = NULL;
     long int reference = 82, attenuation = -10, compensate = 1;
-    long int impulse_length = 4096, fft_length = 16384;
+    long int impulse_length = 4096, fft_length = 0;
 
 #ifdef WITH_THREADS
     long int threads = 1;
@@ -980,7 +1003,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
         if (strcmp(id, "fft_length") == 0) {
             snd_config_get_integer(n, &fft_length);
 
-            if (fft_length < 2 * impulse_length) {
+            if (fft_length != 0 && fft_length < 2 * impulse_length) {
                 SNDERR("FFT length must be at least double the impulse length");
                 return -EINVAL;
             }
