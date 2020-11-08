@@ -998,18 +998,18 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
             continue;
         }
 
-        if (strcmp(id, "impulse_length") == 0) {
+        if (strcmp(id, "window") == 0) {
             snd_config_get_integer(n, &impulse_length);
 
             if (impulse_length < 1024) {
-                SNDERR("Impulse length must not be lower than 1024");
+                SNDERR("Window length must not be lower than 1024");
                 return -EINVAL;
             }
 
             continue;
         }
 
-        if (strcmp(id, "fft_length") == 0) {
+        if (strcmp(id, "fft") == 0) {
             snd_config_get_integer(n, &fft_length);
 
             if (fft_length != 0 && fft_length < 2 * impulse_length) {
