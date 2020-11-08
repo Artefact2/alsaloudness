@@ -303,11 +303,9 @@ static snd_pcm_sframes_t transfer_callback(
     int j;
 
     if(size > context->period_size) {
-        /* Filling many periods at once */
-        for(snd_pcm_uframes_t off = 0; off < size; off += context->period_size) {
-            transfer_callback(ext, dst_areas, dst_offset + off, src_areas, src_offset + off, context->period_size);
-        }
-        return size;
+		/* Do not process more than max period size to avoid buffer overruns */
+		/* ALSA can deal with a partially fullfilled transfer just fine */
+		size = context->period_size;
     }
 
     const unsigned int M = context->impulse_length;
@@ -488,10 +486,11 @@ static snd_pcm_sframes_t transfer_callback(
     return size;
 }
 
-static int init_callback(snd_pcm_extplug_t *ext) {
+static int init_callback(snd_pcm_extplug_t *ext)
+{
+#ifdef WITH_THREADS
     struct context *context = (struct context *)ext->private_data;
 
-#ifdef WITH_THREADS
     if (!fftwf_init_threads()) {
         SNDERR("Could not initialize threading");
         return -1;
@@ -999,18 +998,18 @@ SND_PCM_PLUGIN_DEFINE_FUNC(loudness)
             continue;
         }
 
-        if (strcmp(id, "impulse_length") == 0) {
+        if (strcmp(id, "window") == 0) {
             snd_config_get_integer(n, &impulse_length);
 
             if (impulse_length < 1024) {
-                SNDERR("Impulse length must not be lower than 1024");
+                SNDERR("Window length must not be lower than 1024");
                 return -EINVAL;
             }
 
             continue;
         }
 
-        if (strcmp(id, "fft_length") == 0) {
+        if (strcmp(id, "fft") == 0) {
             snd_config_get_integer(n, &fft_length);
 
             if (fft_length != 0 && fft_length < 2 * impulse_length) {
