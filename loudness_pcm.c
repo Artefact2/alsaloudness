@@ -521,7 +521,7 @@ static int hw_params_callback(snd_pcm_extplug_t *ext, snd_pcm_hw_params_t* param
 
         /* Choose smallest power of two N such that N ≥ L+M-1 */
         context->fft_length = 1 << (int)ceilf(log2f(context->impulse_length + psize - 1));
-        TRACE("Impulse length is %d and maximum period size is %d, using optimal FFT size %d\n", context->impulse_length, psize, context->fft_length);
+        TRACE("Impulse length is %d and maximum period size is %ld, using optimal FFT size %d\n", context->impulse_length, psize, context->fft_length);
     }
 
     const unsigned int N = context->fft_length;
