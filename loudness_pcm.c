@@ -488,10 +488,11 @@ static snd_pcm_sframes_t transfer_callback(
     return size;
 }
 
-static int init_callback(snd_pcm_extplug_t *ext) {
+static int init_callback(snd_pcm_extplug_t *ext)
+{
+#ifdef WITH_THREADS
     struct context *context = (struct context *)ext->private_data;
 
-#ifdef WITH_THREADS
     if (!fftwf_init_threads()) {
         SNDERR("Could not initialize threading");
         return -1;
