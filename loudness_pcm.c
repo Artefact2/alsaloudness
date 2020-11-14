@@ -65,7 +65,6 @@ static const struct{
 struct context {
     snd_pcm_extplug_t ext;
     snd_ctl_t *ctl;
-    snd_pcm_uframes_t period_size;
 
     char *prefix;
 
@@ -302,12 +301,6 @@ static snd_pcm_sframes_t transfer_callback(
     unsigned int i;
     int j;
 
-    if(size > context->period_size) {
-		/* Do not process more than max period size to avoid buffer overruns */
-		/* ALSA can deal with a partially fullfilled transfer just fine */
-		size = context->period_size;
-    }
-
     const unsigned int M = context->impulse_length;
     const unsigned int N = context->fft_length;
     const int C = ext->channels;
@@ -517,7 +510,6 @@ static int hw_params_callback(snd_pcm_extplug_t *ext, snd_pcm_hw_params_t* param
             SNDERR("could not query max period size");
             return -EINVAL;
         }
-        context->period_size = psize;
 
         /* Choose smallest power of two N such that N ≥ L+M-1 */
         context->fft_length = 1 << (int)ceilf(log2f(context->impulse_length + psize - 1));
